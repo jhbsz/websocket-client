@@ -1,0 +1,85 @@
+linux 编译调用libwebsockets命令
+gcc -o client client.c -lwebsockets
+
+
+
+步骤 1: 使用 wss: URI 方案
+
+WebSocket 协议定义了两种 URI 方案。ws: 用于未加密的连接，wss: 用于应加密的安全连接。
+
+    要加密你的连接，请使用 wss: URI 方案。例如：
+    JavaScript
+
+
+    var webSocket = new Windows.Networking.Sockets.MessageWebSocket();
+    webSocket.connectAsync("wss://www.example.com").done(function() {
+         // connect succeeded
+    }, function(e) {
+         // connect failed
+    });
+
+
+备注
+
+有关 WebSocket URI 方案的其他详细信息，请参阅 WebSocket 协议。
+
+
+
+接收端出错信息：
+[1420694227:8729] ERR: ****** 14ac5f0 Sending new, pending truncated ...
+WebSocket_server: /home/mleaf/openwrt/websocket/libwebsockets/lib/output.c:112: lws_issue_raw: Assertion `0' failed.
+Aborted
+经过查找出错信息：
+Output.c中
+int lws_issue_raw(struct libwebsocket *wsi, unsigned char *buf, size_t len)
+函数中
+if (wsi->truncated_send_len && (buf < wsi->truncated_send_malloc ||buf > (wsi->truncated_send_malloc +wsi->truncated_send_len +wsi->truncated_send_offset))) 
+{
+		lwsl_err("****** %x Sending new, pending truncated ...\n", wsi);
+		assert(0);
+}
+
+client端信息：
+LWS_CALLBACK_CLOSED
+Exiting
+[1420694227:8741] NOTICE: libwebsocket_context_destroy
+mirror: LWS_CALLBACK_CLOSED mirror_lifetime=271
+
+
+
+出错解决：目前发现只要服务端只接收不发送就不会出现这个错误
+屏蔽掉：libwebsocket_write(wsi, &buf[LWS_SEND_BUFFER_PRE_PADDING], len, LWS_WRITE_TEXT);
+
+
+
+20150115笔记
+1：错误显示：websocket_client.c:202:4: warning: format not a string literal and no format arguments [-Wformat-security]
+    l += sprintf((char *)&buf[LWS_SEND_BUFFER_PRE_PADDING + l],json_object_to_json_string(my_string));
+解决办法：
+sprintf格式转换的时候少了一个参数"%s", 
+for (n = 0; n < 1; n++)
+		   L += sprintf((char *)&buf[LWS_SEND_BUFFER_PRE_PADDING + L],json_object_to_json_string(my_string));   
+		   
+改为
+for (n = 0; n < 1; n++)
+		   L += sprintf((char *)&buf[LWS_SEND_BUFFER_PRE_PADDING + L],"%s", json_object_to_json_string(my_string));
+错误成功解决。
+
+
+2：错误显示：
+接收端只能收到7个字节数据
+{ "header": { "action": [ "REPORT_DTS_DEVICE_LOG" ], "requestId": [ "aede878b-93be-4b04-9aa9-5da872b857b4" ] }, "data": { "fromDatetime": 28, "toDatetime": 39, "logData": "Logdatafromdtsdevice1asdfaew" } }
+只收到Receive message : { "heade,
+
+解决办法：
+因为sizeof 是对类型和结构体。
+修改如下函数
+
+n = libwebsocket_write(wsi,json_text_test(), sizeof(json_text_test()),  LWS_WRITE_TEXT);
+
+该为
+int num;
+num=strlen(reportDeviceLog());//求数据长度
+n = libwebsocket_write(wsi,json_text_test(), num,  LWS_WRITE_TEXT);
+
+问题成功解决。
